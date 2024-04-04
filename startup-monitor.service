@@ -1,0 +1,11 @@
+[Unit]
+Description=Монитор запуска
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/путь/к//исполняемому/файлу
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

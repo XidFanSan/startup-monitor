@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"os/exec"
+	"runtime"
 	"time"
 
 	"github.com/kardianos/service"
@@ -12,13 +15,23 @@ import (
 type program struct{}
 
 func (p *program) Start(s service.Service) error {
-	go p.run()
+	go p.Run()
 	return nil
 }
 
-func (p *program) run() {
+func (p *program) Run() {
+	// Запускаем HTTP сервер
+	go func() {
+		http.HandleFunc("/", executeHandler)
+		err := http.ListenAndServe(":8080", nil)
+		if err != nil {
+			log.Fatalf("Ошибка запуска HTTP сервера: %v", err)
+		}
+	}()
+
+	// Бесконечный цикл для предотвращения завершения работы службы
 	for {
-		time.Sleep(time.Second) // Пауза для снижения нагрузки на CPU
+		time.Sleep(time.Second)
 	}
 }
 
@@ -27,11 +40,35 @@ func (p *program) Stop(s service.Service) error {
 }
 
 func main() {
-	// Инициализация HTTP сервера
-	go func() {
-		http.HandleFunc("/", executeHandler)
-		log.Fatal(http.ListenAndServe(":8080", nil))
-	}()
+	// Проверяем, запущена ли программа как служба
+	exists, err := isServiceInstalled("Startup-monitor")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if !exists {
+		// Если программа не запущена как служба, устанавливаем её
+		if err := installService(); err != nil {
+			log.Fatal(err)
+		}
+
+		// Проверяем текущую операционную систему
+		switch os := runtime.GOOS; os {
+		case "windows":
+			// В Windows используем команду sc
+			cmd := exec.Command("sc", "start", "Startup-monitor")
+			if err := cmd.Run(); err != nil {
+				log.Fatal(err)
+			}
+		case "linux":
+			// В Linux используем соответствующую команду для запуска службы
+			cmd := exec.Command("systemctl", "start", "startup-monitor.service")
+			if err := cmd.Run(); err != nil {
+				log.Fatal(err)
+			}
+		}
+		return
+	}
 
 	// Запуск службы
 	if err := runService(); err != nil {
@@ -39,11 +76,33 @@ func main() {
 	}
 }
 
+func isServiceInstalled(serviceName string) (bool, error) {
+	svcConfig := &service.Config{
+		Name: serviceName,
+	}
+
+	prg := &program{}
+	svc, err := service.New(prg, svcConfig)
+	if err != nil {
+		return false, fmt.Errorf("ошибка создания службы: %v", err)
+	}
+
+	status, err := svc.Status()
+	if err != nil {
+		if status == service.StatusUnknown {
+			return false, nil // Служба не установлена
+		}
+		return false, fmt.Errorf("ошибка проверки статуса службы: %v", err)
+	}
+
+	return true, nil // Служба установлена
+}
+
 func runService() error {
 	svcConfig := &service.Config{
-		Name:        "Монитор запуска",
+		Name:        "Startup-monitor",
 		DisplayName: "Монитор запуска",
-		Description: "Служба для отслеживания команд в командной строке и их выполнение",
+		Description: "Служба для отслеживания статистики какого-либо приложения через командную строку",
 	}
 
 	prg := &program{}
@@ -58,6 +117,31 @@ func runService() error {
 	return nil
 }
 
+func installService() error {
+	exePath, err := os.Executable()
+	if err != nil {
+		return err
+	}
+
+	svcConfig := &service.Config{
+		Name:        "Startup-monitor",
+		DisplayName: "Монитор запуска",
+		Description: "Служба для отслеживания статистики какого-либо приложения через командную строку",
+		Executable:  exePath,
+	}
+
+	prg := &program{}
+	svc, err := service.New(prg, svcConfig)
+	if err != nil {
+		return fmt.Errorf("ошибка создания службы: %v", err)
+	}
+
+	if err := svc.Install(); err != nil {
+		return fmt.Errorf("ошибка установки службы: %v", err)
+	}
+	return nil
+}
+
 func executeHandler(w http.ResponseWriter, r *http.Request) {
 	// Извлекаем команду из URL
 	command := r.URL.Path[len("/"):]
@@ -65,6 +149,10 @@ func executeHandler(w http.ResponseWriter, r *http.Request) {
 	case "":
 		http.Error(w, "Не указана команда", http.StatusBadRequest)
 		return
+	case "help":
+		fmt.Fprintf(w, "Команды:\n 1) info - информация о приложении;\n 2) calculator - проверочная команда;\n 3) systeminfo - проверочная команда.\n")
+	case "info":
+		fmt.Fprintf(w, "Данное приложение позволяет собирать и получать статистику разных процессов и приложений\n")
 	case "calculator":
 		fmt.Fprintf(w, "Информация о калькуляторе\n")
 	case "systeminfo":
@@ -87,75 +175,3 @@ func executeHandler(w http.ResponseWriter, r *http.Request) {
 	// w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	// w.Write(output)
 }
-
-// func onExit() {
-// 	// Выполняется при выходе из приложения
-// 	systray.Quit()
-// }
-
-// func onReady() {
-// 	iconPath := "startup-monitor.ico"
-// 	iconBytes, err := os.ReadFile(iconPath)
-// 	if err != nil {
-// 		fmt.Println("Ошибка чтения файла иконки:", err)
-// 		return
-// 	}
-
-// 	systray.SetIcon(iconBytes)
-
-// 	mOpenCmd := systray.AddMenuItem("Показать командную строку", "Открыть командную строку")
-// 	systray.AddSeparator()
-// 	mQuit := systray.AddMenuItem("Выход", "Закрыть приложение")
-
-// 	// Функция для обработки нажатий на элементы меню
-// 	go func() {
-// 		for {
-// 			select {
-// 			case <-mQuit.ClickedCh:
-// 				systray.Quit()
-// 				return
-// 			case <-mOpenCmd.ClickedCh:
-// 				openCmd.OpenCmd()
-// 			}
-// 		}
-// 	}()
-
-// 	// Устанавливаем всплывающее сообщение при наведении на иконку
-// 	systray.SetTooltip("health-checker")
-// }
-
-// func onExit() {
-// 	// Выполняется при выходе из приложения
-// }
-
-// func handleCommand(input string) {
-// 	parts := strings.Fields(input)
-// 	if len(parts) == 0 {
-// 		return
-// 	}
-
-// 	switch parts[0] {
-// 	case "info":
-// 		if len(parts) < 2 {
-// 			fmt.Println("Введите: info <application>")
-// 			return
-// 		}
-// 		application := parts[1]
-// 		cmdCommand(application)
-// 	case "exit":
-// 		os.Exit(1)
-// 	default:
-// 		fmt.Println("Команда не существует:", input)
-// 	}
-// }
-
-// func cmdCommand(application string) {
-// 	cmd := exec.Command("cmd", "-c", "ps aux | grep "+application)
-// 	output, err := cmd.Output()
-// 	if err != nil {
-// 		fmt.Println("Ошибка:", err)
-// 		return
-// 	}
-// 	fmt.Println("Информация о приложении:")
-// 	fmt.Println(string(output))
-// }
