@@ -162,16 +162,4 @@ func executeHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Неизвестная команда", http.StatusBadRequest)
 		return
 	}
-
-	// // Выполнение команды в командной строке
-	// cmd := exec.Command("cmd", "/c", command)
-	// output, err := cmd.Output()
-	// if err != nil {
-	// 	http.Error(w, fmt.Sprintf("Ошибка выполнения команды: %s", err), http.StatusInternalServerError)
-	// 	return
-	// }
-
-	// // Возвращаем результат выполнения команды
-	// w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	// w.Write(output)
 }
